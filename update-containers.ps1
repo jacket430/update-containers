@@ -8,16 +8,14 @@ function Get-ContainerName {
     
     $containers = docker ps --format "{{.Names}}"
     
-    # Try exact match first
     if ($containers -contains $ServiceName) {
         return $ServiceName
     }
     
-    # Try common name variations
     $variations = @(
-        $ServiceName.Replace("-", ""),  # No hyphens
-        $ServiceName.Replace("-", "_"), # Hyphens to underscores
-        $ServiceName.ToLower()          # Lowercase
+        $ServiceName.Replace("-", ""),
+        $ServiceName.Replace("-", "_"),
+        $ServiceName.ToLower()
     )
     
     foreach ($variation in $variations) {
@@ -25,25 +23,32 @@ function Get-ContainerName {
             return $variation
         }
     }
-    
-    # If no match found, return the original service name
     return $ServiceName
 }
 
-# Function to check if container needs update
+# Check if container needs update
 function Test-ContainerUpdate {
     param (
         [string]$ContainerName
     )
-    
     try {
-        docker compose pull
+        $containerImageId = docker inspect --format='{{.Image}}' $ContainerName
         
-        # Compare current and latest image IDs
-        $currentImageId = docker inspect --format='{{.Id}}' $ContainerName
-        $latestImageId = docker inspect --format='{{.Id}}' $(docker compose images -q $ContainerName)
+        $containerImage = docker inspect --format='{{.Config.Image}}' $ContainerName
         
-        return $currentImageId -ne $latestImageId
+        docker pull $containerImage 2>&1 | Out-Null
+        
+        $latestImageId = docker image inspect --format='{{.Id}}' $containerImage
+        
+        if ($containerImageId -and $latestImageId) {
+            $containerImageId = $containerImageId -replace '^sha256:', ''
+            $latestImageId = $latestImageId -replace '^sha256:', ''
+            
+            return $containerImageId -ne $latestImageId
+        }
+        
+        $imageUpdated = $LASTEXITCODE -eq 0
+        return $imageUpdated
     }
     catch {
         Write-Host "Error checking updates for $ContainerName : $_"
@@ -51,7 +56,7 @@ function Test-ContainerUpdate {
     }
 }
 
-# Main script execution
+# Main
 try {
     $containerDirs = Get-ChildItem -Path ".\containers" -Directory
     
@@ -82,7 +87,6 @@ try {
             Write-Host "Error processing $($dir.Name): $_"
         }
         finally {
-            # Return to original directory
             Pop-Location
         }
     }
